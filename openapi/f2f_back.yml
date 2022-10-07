@@ -136,17 +136,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UserAbortCommandResponse"
-            "400":
-            description: Bad request
-            "401":
-            description: Unauthorized
-            "500":
-            description: Internal Server Error
-            x-amazon-apigateway-integration:
-            httpMethod: "POST"
-            uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${UserAbortCommandFunction}:live/invocations"
-            passthroughBehavior: "when_no_match"
-            type: "aws_proxy"
+        "400":
+          description: Bad request
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        httpMethod: "POST"
+        uri: ${primary_lambda_arn}
+        passthroughBehavior: "when_no_match"
+        type: "aws_proxy"
+
   /redirect:
     get:
       operationId: getRedirect
@@ -179,7 +180,7 @@ paths:
           description: Internal Server Error
       x-amazon-apigateway-integration:
         httpMethod: "POST"
-        uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${GetRedirectFunction}:live/invocations"
+        uri: ${primary_lambda_arn}
         passthroughBehavior: "when_no_match"
         type: "aws_proxy"
 components:
