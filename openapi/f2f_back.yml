@@ -1,0 +1,374 @@
+openapi: "3.0.1"
+info:
+  title: "F2F Backend API"
+  version: "1.0"
+  description: |
+    Face-to-face verification CRI (F2F CRI). Validates request from IPV Core, collects further information from the user, and initiates a request with a third party who manages the physical document check process with the Post Office
+tags:
+  - name: F2F Backend API
+    description: |
+      Backend endpoints in F2F CRI 
+
+x-amazon-apigateway-request-validators:
+  all:
+    validateRequestBody: true
+    validateRequestParameters: true
+  params-only:
+    validateRequestBody: false
+    validateRequestParameters: true
+  disable:
+    validateRequestBody: false
+    validateRequestParameters: false
+x-amazon-apigateway-request-validator: disable
+paths:
+  /verifyAuthorizeRequest:
+    post:
+      operationId: postVerifyAuthorizeRequest
+      summary: Verify the incoming JAR request and initiate an Auth Session
+      description: >-
+        Verify Authorization Request - Verify the [JAR request](https://datatracker.ietf.org/doc/rfc9101/) received from calling RP. This service only supports section Passing a Request Object by Value (see section 5.1). If verified, a new session will be created and a `sessionId` will be returned to the caller.
+      tags:
+        - Auth Session
+      parameters:
+        - $ref: '#/components/parameters/ResponseType'
+        - $ref: '#/components/parameters/ClientId'
+        - $ref: '#/components/parameters/Request'
+      responses:
+        "200":
+          description: >-
+            OK - OAuth token is valid - Session details have been stored in the backend and a `sessionId` is returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionIdResponse"
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+    x-amazon-apigateway-integration:
+      httpMethod: "POST"
+      uri: ${primary_lambda_arn}
+      passthroughBehavior: "when_no_match"
+      type: "aws_proxy"
+  /token:
+    post:
+      operationId: postToken
+      summary: Exchange an Authorization Code for an Access Token
+      description: >-
+        Issue Access Token. OAuth2 standard endpoint which exchanges the authorization_code supplied and
+        returns a signed access_token which can be used directly in API calls as a Bearer token. Note
+        the service will only issue an access token once for any given session.
+      tags:
+        - OAuth and OIDC
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/IssueTokenRequest'
+      responses:
+        "200":
+          description: >-
+            OK - OAuth token is valid - Session details have been stored in the backend and a `sessionId` is returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssueTokenResponse"
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+    x-amazon-apigateway-integration:
+      httpMethod: "POST"
+      uri: ${primary_lambda_arn}
+      passthroughBehavior: "when_no_match"
+      type: "aws_proxy"
+
+  /userinfo:
+    post:
+      operationId: postUserInfo
+      summary: Retrieve the JWT contained the Verified Credential(s) for a given Auth Session.
+      description: >-
+        Returns a JWT containing the user information and associated verified credentials as supplied by the
+                biometrics vendor. Requires an access token as issued by `POST /token`, and can only be called once.
+      tags:
+        - OAuth and OIDC
+      parameters:
+        - $ref: '#/components/parameters/Authorization'
+      responses:
+        "200":
+          description: >-
+            OK - Signed JWT returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserInfoJwt"
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        httpMethod: "POST"
+        uri: ${primary_lambda_arn}
+        passthroughBehavior: "when_no_match"
+        type: "aws_proxy"
+
+  /userAbortCommand:
+    post:
+      operationId: postUserAbortCommand
+      summary: Mark an Auth Session as Aborted
+      description: >-
+        Mark the session as Aborted. Note this operation is terminal - it cannot be undone.This endpoint is idempotent, i.e. successive invocations will return the same result, and there attempting to abort an already aborted session will return a 200 status code.
+      tags:
+        - Auth Session
+      requestBody:
+        description: A JSON object containing a sessionId
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserAbortCommandBody"
+      responses:
+        "200":
+          description: >-
+            OK - Session has been aborted
+            content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserAbortCommandResponse"
+            "400":
+            description: Bad request
+            "401":
+            description: Unauthorized
+            "500":
+            description: Internal Server Error
+            x-amazon-apigateway-integration:
+            httpMethod: "POST"
+            uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${UserAbortCommandFunction}:live/invocations"
+            passthroughBehavior: "when_no_match"
+            type: "aws_proxy"
+  /redirect:
+    get:
+      operationId: getRedirect
+      summary: Get redirect details for a given Auth Session.
+      description: >-
+        Checks the sessionState for the given sessionId and returns the information needed for 
+        redirect back to a Relying Party.
+        
+        * For successful Auth Sessions the redirect information includes an
+        Authorization Code, and this endpoint can only be called once.
+        * For aborted Auth Sessions the redirect
+        information includes error details, and the endpoint is idempotent.
+      tags:
+        - Auth Session
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        "200":
+          description: >-
+            OK - Redirect returned
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/SuccessRedirectResponse"
+                  - $ref: "#/components/schemas/AbortRedirectResponse"
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        httpMethod: "POST"
+        uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${GetRedirectFunction}:live/invocations"
+        passthroughBehavior: "when_no_match"
+        type: "aws_proxy"
+components:
+  parameters:
+    SessionId:
+      in: query
+      name: sessionId
+      example: 22222222-2222-2222-2222-222222222222
+      required: true
+      description: >-
+        `sessionId` as returned by POST /verifyAuthorizeRequest
+      schema:
+        type: string
+        format: uuid
+    Authorization:
+      in: header
+      name: Authorization
+      example: xxx
+      required: true
+      description: >-
+        OAuth Bearer JWT token - this it the `authorizationCode` returned by `GET /authorizationCode`
+      schema:
+        type: string
+    ResponseType:
+      in: query
+      name: response_type
+      example: xxx
+      required: true
+      description: the type of authorization response that is expected
+      schema:
+        type: string
+    ClientId:
+      in: query
+      name: client_id
+      example: xxx
+      required: true
+      description: the OAuth client identifier which has been registered with DCMAW
+      schema:
+        type: string
+    Request:
+      in: query
+      name: request
+      example: eyJhbGciOiJSU0EtT0FFUC0yNTYiLCJlbmMiOiJBMjU2R0NNIn0.AISIEvimTkm_1gfG9gQA5btB7lHu2riU90KI-UyuH35CABCJk_KKUTsptasmNG5n6Zo6jL8vlMrj3y4A44nDrnTeH_OGLByerCd-EKNx9EZrplcsQ8VM8dip7LCUQy10OGH6ggoMGq9TbiC7lP_8md8UgvcNzd_zm6q6Ade5zd_sUzTWNSX3q6lVfpkpuMdj-2l18zk-yJEvaDArP7U1VBT8531ixxW1lUKflTHlyC-t6B-45R04o3KubhVb-_gVt7KKXo7UQUY-wmHiTUGsxWb3xrROKs6tv4Ug7Oi1MVngesL8CahjyLamvk-tdS1ji2rxn47Xs2Q21FQf3cHPtQ.9bNdWPzw2Cf6uyR_.VVj96Ejcc84yKv3gfHY6Nond9FJrQ-AoQ7pQSlmnzicoJ7hpHwyHUuNiSJNO4q631VKAblNbdprAA11PcYL3f_hcocxwORR8e3tQlDG9TFn6lxg3l9M34ccJrkD51ippIpsChQhIFqS2hU5W9BFyOPdpQhlhtc7R-d0zqbylh-z-snzxRG7Q-hVsBQpOzOLMDWcJNOCHlF8kZjp4dlWYFj3Yl_9HAa-hrY-DpoxdkvXVIrBdJarD77Bwwxo8y1IWEgCuDA8t5ZmrZMY9fxoufQg9jW5D7hB3qysgSo3S-6SFyt3rP_WD5ecezRrTCY-voDeWBtfdwuKo5UUaPidN4ut1n8SXAdoANxgbuEhyABjvMESi3AnWwZRx8yh3xEMVSwZ8kFQ4cVeBW2hrkiSXMjL1Wtz6nhhY9itFcmzBU4JMvoYfdf-ZZP-F4ph_Xh9CRS7rBzmrgUt81LahzYfCY91lS93qT7r3Wrh0OfIb0vvIkVUebDdCZw25PoG2oREty4k59z7j9ho8VqbtSS6_kpJGWx8Sikut1I-bVduk79Vf1MwEGxSRvZ_pyZHxxZDe19GPfamhctFXMcebyJoT2zwWhcW4AWFSUtm2JI36sZhFcsdRIRBfSjJ4MNXdlrHdOyhvo8SwTWpfO5lU9yyF8lANbXxjdnRSV6sR1iaBs_16slbWJX3WC6RmC76x8MlHn1fLBK_lU_IeZChZqLCwqUC3CXbk17OkTkdeCqFyZSS5rlfm-EiPvam6iW51tA-ywxrmUjkCDE_k-zZIZTVVSg.3YAfgcQ4ZkPtYPNvOzWCLQ
+      required: true
+      description: >-
+        an JWT which has been signed with the clients signing private key and encrypted with the DCMAW public encryption key.
+      schema:
+        type: string
+
+
+  schemas:
+    UserAbortCommandBody:
+      type: object
+      required:
+        - sessionId
+      properties:
+        sessionId:
+          type: string
+    AbortRedirectResponse:
+      type: object
+      description: >-
+        confirms the user has aborted their session and provides the caller with the appropriate
+        `redirectUri`, `state`, `error` and `errorDescription` to return to the Relying Party (RP).
+      required:
+        - type
+        - redirectUri
+        - state
+        - error
+        - errorDescription
+      additionalProperties: true
+      properties:
+        type:
+          type: string
+          description: An indicator as to whether the redirect is a success or error redirect
+          enum: [ success, error ]
+        redirectUri:
+          type: string
+          description: Redirect URI
+        state:
+          type: string
+          description: >-
+            state as received from the RP via the initial JWT token in `request` (it is passed through the
+            call per OAuth specification)
+        error:
+          type: string
+          description: >-
+            A single ASCII error code as defined in section 4.1.2.1 of RFC6749 The OAuth 2.0 
+            Authorization Framework
+          enum: [ invalid_request, unauthorized_client, access_denied, unsupported_response_type, invalid_scope, server_error, temporarily_unavailable ]
+        errorDescription:
+          type: string
+          description: >-
+            Human-readable ASCII text providing additional information, used to assist the client 
+            developer in understanding the error that occurred.
+    SuccessRedirectResponse:
+      type: object
+      description: >-
+        confirms the user has successfully completed their session and provides the caller with the appropriate 
+        `redirectUri`, `state` and `authorizationCode` to return to the Relying Party (RP).
+      additionalProperties: true
+      required:
+        - type
+        - authorizationCode
+        - redirectUri
+        - state
+      properties:
+        type:
+          type: string
+          description: An indicator as to whether the redirect is a success or error redirect
+          enum: [ success, error ]
+        authorizationCode:
+          type: string
+          description: Authorization Code
+          format: uuid
+          example: 22222222-2222-2222-2222-222222222222
+        redirectUri:
+          type: string
+          description: Redirect URI
+        state:
+          type: string
+          description: >-
+            state as received from the RP via the initial JWT token in `request` (it is passed through the
+            call per OAuth specification)
+    UserInfoJwt:
+      type: object
+      additionalProperties: true
+      required:
+        - sub
+        - 'https://vocab.account.gov.uk/v1/credentialJWT'
+      properties:
+        sub:
+          type: string
+          format: uuid
+          description: "`sessionId` value"
+          example: 22222222-2222-2222-2222-222222222222
+        'https://vocab.account.gov.uk/v1/credentialJWT':
+          type: string
+          description: >-
+            Signed JWT response with user credentials including the outcome from the biometric checks
+    IssueTokenRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - grant_type
+        - code
+        - redirect_uri
+      properties:
+        grant_type:
+          type: string
+          example: authorization_code
+          description: >-
+            OAuth grant type. At present the only supported grant type is `authorization_code`.
+                  enum:
+                    - authorization_code
+                code:
+                  type: string
+                  format: uuid
+                  example: 33333333-3333-3333-3333-333333333333
+                  description: >-
+                    `authorization_code` as issued by POST /authorizationCode.
+                redirect_uri:
+                  type: string
+                  example: https://www.example.com/receiveToken
+                  description: Redirect URI as per OAuth spec
+    IssueTokenResponse:
+      type: object
+      additionalProperties: true
+      required:
+        - access_token
+        - token_type
+        - expires_in
+      properties:
+        access_token:
+          type: string
+          example: ABCDABCDABCDABCDABCDABCDABCD
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: number
+          example: 3600
+    SessionIdResponse:
+      type: object
+      additionalProperties: true
+      required:
+        - sessionId
+      properties:
+        sessionId:
+          type: string
+          description: Session ID
+          format: uuid
+          example: 11111111-1111-1111-1111-111111111111
