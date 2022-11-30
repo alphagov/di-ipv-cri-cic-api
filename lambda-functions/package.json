@@ -13,7 +13,7 @@
   "scripts": {
     "compile": "tsc",
     "e2e": "./node_modules/.bin/jest --testPathPattern=tests/e2e",
-    "infra": "./node_modules/.bin/jest --testPathPattern=**/tests/infra --testMatch **/tests/**/*.test-infra.ts",
+    "infra": "./node_modules/.bin/jest --testPathPattern=tests/infra --testMatch **/tests/**/*.test-infra.ts?(x)",
     "integration": "./node_modules/.bin/jest --testPathPattern=tests/integration",
     "lint": "./node_modules/.bin/ts-standard --fix",
     "lint:check": "./node_modules/.bin/ts-standard",
